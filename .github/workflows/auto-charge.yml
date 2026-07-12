@@ -1,9 +1,9 @@
 name: Neptune Auto Charge
 
 on:
-  # 定时运行：北京时间 6:05 = UTC 22:05（前一天）
+  # 定时运行：北京时间 6:02 = UTC 22:02（前一天）
   schedule:
-    - cron: '5 22 * * *'
+    - cron: '2 22 * * *'
 
   # 支持手动触发（用于测试）
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
 jobs:
   auto-charge:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
       - name: Checkout repository
