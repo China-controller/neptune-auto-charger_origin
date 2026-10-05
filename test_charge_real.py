@@ -10,6 +10,8 @@ import os
 import sys
 
 from dotenv import load_dotenv
+from charge_confirmation import confirm_charge
+from charge_request import build_charge_params
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -21,20 +23,16 @@ OPEN_ID = os.getenv("NEPTUNE_OPEN_ID")
 _area_id_raw = os.getenv("NEPTUNE_AREA_ID")
 AREA_ID = int(_area_id_raw) if _area_id_raw else None
 
-if not OPEN_ID or AREA_ID is None:
-    raise RuntimeError(
-        "缺少 .env 配置：请在 .env 中设置 NEPTUNE_OPEN_ID 与 NEPTUNE_AREA_ID（参考 .env.example）"
-    )
 DEV_ADDRESS = "50559141"  # 目标设备
-TARGET_PORT = "11"  # 目标端口 (索引从00开始，11是第12个端口)
+TARGET_PORT = "12"  # 从 1 开始的真实物理端口号
 
-BASE_URL = "http://www.szlzxn.cn"
+BASE_URL = "https://www.szlzxn.cn"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 16; 24117RK2CC Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.7444.173 Mobile Safari/537.36 XWEB/1420113 MMWEBSDK/20250904 MMWEBID/7686 MicroMessenger/8.0.65.2960(0x28004153) WeChat/arm64 Weixin NetType/5G Language/zh_CN ABI/arm64",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "http://www.szlzxn.cn",
-    "Referer": f"http://www.szlzxn.cn/wx/indexn.html?openId={OPEN_ID}&areaid={AREA_ID}",
+    "Origin": BASE_URL,
+    "Referer": f"{BASE_URL}/wx/indexn.html?openId={OPEN_ID}&areaid={AREA_ID}",
     "Accept": "*/*",
 }
 
@@ -71,25 +69,10 @@ async def begin_charge(
 ) -> dict:
     """启动充电"""
     url = f"{BASE_URL}/wxn/beginCharge"
-    params = {
-        "devaddress": devaddress,
-        "port": port,
-        "money": charge_money,
-        "areaId": AREA_ID,
-        "openId": OPEN_ID,
-        "beforemoney": beforemoney,
-        "devtypeid": device_info.get("devtypeid", 40),
-        "fullStop": 0,
-        "payType": 1,
-        "safeOpen": 0,
-        "safeCharge": device_info.get("safeCharge", 9),
-        "edtType": 0,
-        "efee": device_info.get("efee", 110),
-        "eCharge": device_info.get("eCharge", 55),
-        "serviceCharge": device_info.get("serviceCharge", 55),
-        "userId": 0,
-        "yuan7": 0,
-    }
+    params = build_charge_params(
+        devaddress, port, beforemoney, device_info, AREA_ID, OPEN_ID,
+        charge_money=charge_money,
+    )
 
     # 第一次调用 - 获取 msgflag
     print("\n[步骤1] 发送初始请求...")
@@ -106,17 +89,24 @@ async def begin_charge(
 
     print(f"✓ 获取到 msgflag: {msgflag}")
 
-    # 第二次调用 - 带 msgflag 确认
-    print("\n[步骤2] 发送确认请求...")
+    # 后续调用始终复用同一 msgflag，等待设备异步响应。
     params["msgflag"] = msgflag
-    async with session.post(url, data=params, headers=HEADERS) as resp:
-        result2 = await resp.json()
-        print(f"响应: {result2}")
 
-    return result2
+    async def request_confirmation():
+        async with session.post(url, data=params, headers=HEADERS) as resp:
+            return await resp.json()
+
+    def report(attempt, result):
+        print(f"[确认 {attempt}/15] 响应: {result}")
+
+    return await confirm_charge(request_confirmation, on_result=report)
 
 
 async def main():
+    if not OPEN_ID or AREA_ID is None:
+        raise RuntimeError(
+            "缺少 .env 配置：请设置 NEPTUNE_OPEN_ID 与 NEPTUNE_AREA_ID"
+        )
     print("=" * 60)
     print("Neptune 充电桩 - 实际充电测试")
     print("=" * 60)
@@ -156,14 +146,14 @@ async def main():
 
         # 显示每个端口状态
         print("\n  端口详情:")
-        for i, status in enumerate(portstatur):
+        for i, status in enumerate(portstatur, start=1):
             status_text = {"0": "空闲", "1": "使用中", "3": "故障"}.get(status, "未知")
             marker = " <-- 目标" if f"{i:02d}" == TARGET_PORT or str(i) == TARGET_PORT else ""
             print(f"    端口 {i:02d}: {status} ({status_text}){marker}")
 
         # 3. 检查目标端口状态
-        # 端口索引可能从 0 开始，所以 "12" 可能是索引 12
-        port_index = int(TARGET_PORT)
+        # 物理端口从 1 开始，状态字符串下标从 0 开始。
+        port_index = int(TARGET_PORT) - 1
         if port_index >= len(portstatur):
             print(f"\n✗ 端口 {TARGET_PORT} 不存在（设备只有 {len(portstatur)} 个端口）")
             return

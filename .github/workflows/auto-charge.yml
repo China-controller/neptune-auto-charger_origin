@@ -1,9 +1,16 @@
 name: Neptune Auto Charge
 
 on:
-  # 定时运行：北京时间 6:02 = UTC 22:02（前一天）
+  # GitHub 使用 UTC；提前设置多个独立恢复时刻以抵抗调度延迟。
   schedule:
-    - cron: '2 22 * * *'
+    - cron: '47 18 * * *' # 02:47 北京时间
+    - cron: '17 19 * * *' # 03:17 北京时间
+    - cron: '47 19 * * *' # 03:47 北京时间
+    - cron: '17 20 * * *' # 04:17 北京时间
+    - cron: '47 20 * * *' # 04:47 北京时间
+    - cron: '17 21 * * *' # 05:17 北京时间
+    - cron: '47 21 * * *' # 05:47 北京时间
+    - cron: '7 22 * * *'  # 06:07 北京时间
 
   # 支持手动触发（用于测试）
   workflow_dispatch:
@@ -25,6 +32,10 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m unittest discover -p "test_*.py"
 
       - name: Create .env file
         run: |
